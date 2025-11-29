@@ -1,0 +1,97 @@
+.dashboard h1 {
+  color: #2c3e50;
+  margin-bottom: 0.5rem;
+}
+
+.welcome {
+  color: #7f8c8d;
+  margin-bottom: 2rem;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 3rem;
+}
+
+.stat-card {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.stat-card h3 {
+  color: #7f8c8d;
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-bottom: 1rem;
+  text-transform: uppercase;
+}
+
+.stat-number {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: #3498db;
+  margin-bottom: 0.5rem;
+}
+
+.stat-role {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #9b59b6;
+  margin-bottom: 0.5rem;
+}
+
+.stat-description {
+  color: #95a5a6;
+  font-size: 0.9rem;
+}
+
+.stat-link {
+  color: #3498db;
+  font-size: 0.9rem;
+  transition: color 0.2s;
+}
+
+.stat-link:hover {
+  color: #2980b9;
+}
+
+.recent-section h2 {
+  color: #2c3e50;
+  margin-bottom: 1rem;
+}
+
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.recent-item {
+  background: white;
+  padding: 1rem;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: transform 0.2s;
+}
+
+.recent-item:hover {
+  transform: translateX(4px);
+}
+
+.completion {
+  margin-left: 1rem;
+  color: #27ae60;
+  font-size: 0.9rem;
+}
+
+.deadline {
+  color: #7f8c8d;
+  font-size: 0.9rem;
+}
