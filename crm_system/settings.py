@@ -32,7 +32,7 @@ ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv(
 # Application definition
 
 INSTALLED_APPS = [
-    'users',
+    'users.apps.UsersConfig',
     'crm',
     'jazzmin',
     'django.contrib.admin',
@@ -44,7 +44,6 @@ INSTALLED_APPS = [
 
     # Third party apps
     'rest_framework',
-    'rest_framework.authtoken',
     'corsheaders',
     'django_filters',
     'drf_spectacular',
@@ -126,7 +125,8 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = "/var/www/crm/staticfiles/"
 
 # settings.py
 
