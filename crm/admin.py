@@ -1,16 +1,87 @@
-# CrmAiStrategy/crm/admin.py
-
 from django.contrib import admin
-from .models import Project, Developer
+from .models import Project, Developer, ProjectDocument
+
+
+# === Inline для множества документов ===
+class ProjectDocumentInline(admin.TabularInline):
+    model = ProjectDocument
+    extra = 1
+
+    # ---- Права на inline-модель документов ----
+    def has_view_permission(self, request, obj=None):
+        """
+        Документы видят:
+        - Admin (роль ADMIN или superuser)
+        - PM (менеджер проекта)
+        Разработчик не видит вообще.
+        """
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser or getattr(user, "is_admin_role", lambda: False)():
+            return True
+        if getattr(user, "is_pm", lambda: False)():
+            return True
+        return False
+
+    def has_add_permission(self, request, obj=None):
+        """
+        Добавлять документы могут:
+        - Admin
+        - PM
+        """
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser or getattr(user, "is_admin_role", lambda: False)():
+            return True
+        if getattr(user, "is_pm", lambda: False)():
+            return True
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """
+        Редактировать документы могут:
+        - Admin
+        - PM
+        """
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser or getattr(user, "is_admin_role", lambda: False)():
+            return True
+        if getattr(user, "is_pm", lambda: False)():
+            return True
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """
+        Удалять документы могут:
+        - Admin
+        - PM
+        """
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser or getattr(user, "is_admin_role", lambda: False)():
+            return True
+        if getattr(user, "is_pm", lambda: False)():
+            return True
+        return False
 
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
-    list_display = ('name', 'customer_name', 'total_cost', 'deadline', 'completion_percent', 'responsible')
+    list_display = ('name', 'customer_name', 'total_cost', 'deadline',
+                    'completion_percent', 'responsible')
     list_filter = ('deadline', 'completion_percent', 'responsible')
     search_fields = ('name', 'customer_name')
     list_select_related = ('responsible',)
     autocomplete_fields = ('developers',)
+
+    inlines = [ProjectDocumentInline]
+
+    # === Права доступа к модулю и объектам ===
 
     def get_list_display(self, request):
         """
@@ -29,8 +100,6 @@ class ProjectAdmin(admin.ModelAdmin):
 
         # Остальные — ничего
         return ()
-
-    # === Права доступа к модулю и объектам ===
 
     def has_module_permission(self, request):
         """
@@ -129,11 +198,21 @@ class ProjectAdmin(admin.ModelAdmin):
 
     def get_fields(self, request, obj=None):
         fields = super().get_fields(request, obj)
-        # Разраб не видит финансы и документы
+        # Разраб не видит финансы (и старое поле documents, если оно вдруг появится)
         if request.user.is_dev():
             forbidden = ('customer_name', 'total_cost', 'documents')
             return [f for f in fields if f not in forbidden]
         return fields
+
+    def get_inline_instances(self, request, obj=None):
+        """
+        Разработчики не видят блок с документами вообще.
+        Админ и PM видят и могут работать с файлами своих проектов.
+        """
+        user = request.user
+        if getattr(user, "is_dev", lambda: False)():
+            return []
+        return super().get_inline_instances(request, obj)
 
 
 @admin.register(Developer)
