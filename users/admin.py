@@ -1,36 +1,58 @@
-# CrmAiStrategy/users/admin.py
-
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
-from .models import User
+from django.contrib.auth.forms import UserCreationForm
+from django import forms
 
-# Убираем Tokens и Groups из админки
 from rest_framework.authtoken.models import Token
 from django.contrib.auth.models import Group
 
-# Аккуратно удаляем Token, если он зарегистрирован
+from unfold.admin import ModelAdmin
+from .models import User
+
+
+# Убираем Tokens и Groups из админки
 try:
     admin.site.unregister(Token)
 except admin.sites.NotRegistered:
     pass
 
-# Аккуратно удаляем Group, если он зарегистрирован
 try:
     admin.site.unregister(Group)
 except admin.sites.NotRegistered:
     pass
 
 
-@admin.register(User)
-class UserAdmin(DjangoUserAdmin):
+class UnfoldUserCreationForm(UserCreationForm):
     """
-    Кастомная админка для User:
-    - Показываем только основные поля (username, full_name, email, role)
-    - Не показываем группы и permissions (они есть, но скрыты от UI)
-    - Доступ к разделу пользователей только у ADMIN-роли и суперпользователя
+    Форма создания пользователя.
+    Делаем password1/password2 визуально заметными через attrs виджета (без отдельного CSS).
+    """
+    class Meta(UserCreationForm.Meta):
+        model = User
+        fields = ("username", "full_name", "email", "role")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # делаем поля пароля заметными: рамка/фон/отступы (через inline attrs)
+        for name in ("password1", "password2"):
+            if name in self.fields:
+                self.fields[name].widget = forms.PasswordInput(render_value=False)
+                self.fields[name].widget.attrs.update({
+                    "autocomplete": "new-password",
+                    "placeholder": "Введите пароль" if name == "password1" else "Повторите пароль",
+                })
+
+
+@admin.register(User)
+class UserAdmin(ModelAdmin, DjangoUserAdmin):
+    """
+    Кастомная админка для User (как у тебя было), но на Unfold
+    + исправлена видимость password-полей на add-form.
     """
 
-    # Убираем стандартные fieldsets DjangoUserAdmin, оставляем только нужные поля
+    add_form = UnfoldUserCreationForm  # ✅ важно!
+
     fieldsets = (
         ("Основная информация", {
             "fields": ("username", "password", "full_name", "email", "role")
@@ -44,38 +66,25 @@ class UserAdmin(DjangoUserAdmin):
         }),
     )
 
-    # Поля в списке
     list_display = ("username", "full_name", "email", "role")
     list_filter = ("role",)
-
-    filter_horizontal = ()
     ordering = ("username",)
 
-    # Исключаем только first_name/last_name, т.к. их нет в модели
-    # Остальные служебные поля (is_staff, is_active, is_superuser, groups, user_permissions)
-    # не попадают в форму, т.к. не входят в fieldsets, но остаются рабочими в модели.
     exclude = ("first_name", "last_name")
+    filter_horizontal = ()
 
     def has_module_permission(self, request):
-        """
-        Доступ к разделу пользователей в админке:
-        - суперюзер
-        - ADMIN по роли (ген. дир, тех. дир)
-        """
         user = request.user
         if not user or not user.is_authenticated:
             return False
         if user.is_superuser:
             return True
-        # метод is_admin_role определён в модели User
         return getattr(user, "is_admin_role", lambda: False)()
 
     def has_view_permission(self, request, obj=None):
-        # Просмотр пользователей — тем же, кому разрешён модуль
         return self.has_module_permission(request)
 
     def has_change_permission(self, request, obj=None):
-        # Менять пользователей может только админ/суперпользователь
         return self.has_module_permission(request)
 
     def has_add_permission(self, request):
