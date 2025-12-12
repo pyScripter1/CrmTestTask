@@ -65,7 +65,12 @@ class Project(models.Model):
 
     developers = models.ManyToManyField(Developer, related_name='projects', blank=True, verbose_name="Разработчики")
 
-    stages = models.JSONField(default=list, blank=True, verbose_name="Этапы проекта")
+    stages = models.TextField(
+        blank=True,
+        default='',
+        verbose_name="Этапы проекта",
+        help_text="Введите этапы проекта по порядку"
+    )
     active_stage = models.CharField(max_length=255, blank=True, default='', verbose_name="Текущий этап")
     comments = models.TextField(blank=True, default='', verbose_name="Комментарии")
 

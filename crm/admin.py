@@ -1,9 +1,12 @@
 from django.contrib import admin
+
+from unfold.admin import ModelAdmin, TabularInline  # 👈 база из Unfold
+
 from .models import Project, Developer, ProjectDocument
 
 
 # === Inline для множества документов ===
-class ProjectDocumentInline(admin.TabularInline):
+class ProjectDocumentInline(TabularInline):
     model = ProjectDocument
     extra = 1
 
@@ -71,12 +74,20 @@ class ProjectDocumentInline(admin.TabularInline):
 
 
 @admin.register(Project)
-class ProjectAdmin(admin.ModelAdmin):
-    list_display = ('name', 'customer_name', 'total_cost', 'deadline',
-                    'completion_percent', 'responsible')
+class ProjectAdmin(ModelAdmin):  # 👈 наследуемся от Unfold ModelAdmin
+    list_display = (
+        'name',
+        'customer_name',
+        'total_cost',
+        'deadline',
+        'completion_percent',
+        'responsible',
+    )
     list_filter = ('deadline', 'completion_percent', 'responsible')
     search_fields = ('name', 'customer_name')
     list_select_related = ('responsible',)
+
+    # 👉 крассивый виджет выбора разработчиков (Unfold + autocomplete_fields)
     autocomplete_fields = ('developers',)
 
     inlines = [ProjectDocumentInline]
@@ -92,7 +103,14 @@ class ProjectAdmin(admin.ModelAdmin):
 
         # Админ и PM видят все поля
         if user.is_superuser or user.is_admin_role() or user.is_pm():
-            return ('name', 'customer_name', 'total_cost', 'deadline', 'completion_percent', 'responsible')
+            return (
+                'name',
+                'customer_name',
+                'total_cost',
+                'deadline',
+                'completion_percent',
+                'responsible',
+            )
 
         # Разработчик — только безопасные поля
         if user.is_dev():
@@ -216,7 +234,7 @@ class ProjectAdmin(admin.ModelAdmin):
 
 
 @admin.register(Developer)
-class DeveloperAdmin(admin.ModelAdmin):
+class DeveloperAdmin(ModelAdmin):  # 👈 тоже на базе Unfold
     list_display = ('full_name', 'position', 'cooperation_format', 'salary')
     list_filter = ('cooperation_format', 'position')
     search_fields = ('full_name', 'position', 'competencies')
