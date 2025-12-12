@@ -32,9 +32,15 @@ ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv(
 # Application definition
 
 INSTALLED_APPS = [
+    # Unfold – новая тема админки (обязательно до django.contrib.admin)
+    "unfold",
+    "unfold.contrib.filters",   # опционально, но полезно
+    "unfold.contrib.forms",     # опционально, улучшенные виджеты
+    "unfold.contrib.inlines",   # опционально, расширенные инлайны
+
     'users.apps.UsersConfig',
     'crm',
-    'jazzmin',
+
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -132,11 +138,9 @@ STATIC_ROOT = "/var/www/crm/staticfiles/"
 
 # settings.py
 
-JAZZMIN_UI_TWEAKS = {
-        "theme": "cyborg",  # Default theme for light mode or no preference
-        # "dark_mode_theme": "darkly", # Theme for users who prefer dark mode
-        # ... other tweaks
-    }
+UNFOLD = {
+    "THEME": "dark",
+}
 
 
 # Default primary key field type
