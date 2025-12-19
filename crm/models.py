@@ -2,6 +2,8 @@ from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator, FileExtensionValidator
 
+import uuid
+
 User = settings.AUTH_USER_MODEL
 
 
@@ -77,6 +79,14 @@ class Project(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
 
+    kanban_token = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        db_index=True,
+        verbose_name="Токен канбана",
+    )
+
     class Meta:
         ordering = ['-created_at']
         verbose_name = 'Проект'
@@ -112,3 +122,65 @@ class ProjectDocument(models.Model):
 
     def __str__(self):
         return f"{self.project.name} — {self.file.name}"
+
+# новые модели, для изоляции каждой доски для своего проекта
+class KanbanColumn(models.Model):
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="kanban_columns",
+    )
+
+    code = models.CharField(
+        max_length=32,
+        verbose_name="Код колонки",
+    )
+
+    title = models.CharField(
+        max_length=100,
+        verbose_name="Название колонки",
+    )
+
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = ("project", "code")
+        ordering = ["order"]
+
+    def __str__(self):
+        return f"{self.project.name} — {self.title}"
+
+
+
+class KanbanTask(models.Model):
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="kanban_tasks",
+        verbose_name="Проект",
+    )
+    column = models.ForeignKey(
+        KanbanColumn,
+        on_delete=models.CASCADE,
+        related_name="tasks",
+        verbose_name="Колонка",
+    )
+    title = models.CharField(max_length=255, verbose_name="Заголовок")
+    description = models.TextField(blank=True, verbose_name="Описание")
+    order = models.PositiveIntegerField(default=0, verbose_name="Порядок")
+    assignee = models.ForeignKey(
+        Developer,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        verbose_name="Исполнитель",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["order"]
+        verbose_name = "Задача канбана"
+        verbose_name_plural = "Задачи канбана"
+
+    def __str__(self):
+        return self.title

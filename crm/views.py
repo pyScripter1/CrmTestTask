@@ -1,15 +1,21 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from django.shortcuts import get_object_or_404, render
+from django.http import Http404
+from django.db import transaction
+
+
 import logging
 
-from .models import Project, Developer
+from .models import Project, Developer, KanbanColumn, KanbanTask
 from .serializers import (
     ProjectAdminSerializer, ProjectPMSerializer, ProjectDeveloperSerializer, ProjectListSerializer,
-    DeveloperAdminSerializer, DeveloperPMSerializer, DeveloperDeveloperSerializer, DeveloperListSerializer
+    DeveloperAdminSerializer, DeveloperPMSerializer, DeveloperDeveloperSerializer, DeveloperListSerializer,
+    KanbanTaskSerializer, KanbanColumnSerializer
 )
 from .permissions import (
     IsAdminRole, IsProjectManagerRole, IsDeveloperRole,
@@ -17,6 +23,37 @@ from .permissions import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# === Kanban defaults ===
+DEFAULT_KANBAN_COLUMNS = [
+    ("queue", "Очередь"),
+    ("inprogress", "В работе"),
+    ("help", "Нужна помощь"),
+    ("blocked", "Заблокировано"),
+    ("done", "Готово"),
+]
+
+def ensure_kanban_columns(project):
+    """
+    Гарантирует, что у проекта есть все стандартные колонки канбана.
+    Безопасно вызывать много раз.
+    """
+    existing_codes = set(
+        KanbanColumn.objects.filter(project=project)
+        .values_list("code", flat=True)
+    )
+
+    with transaction.atomic():
+        for order, (code, title) in enumerate(DEFAULT_KANBAN_COLUMNS):
+            if code not in existing_codes:
+                KanbanColumn.objects.create(
+                    project=project,
+                    code=code,
+                    title=title,
+                    order=order,
+                )
+
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -280,3 +317,226 @@ class DeveloperViewSet(viewsets.ModelViewSet):
                 {"error": "Failed to get projects", "detail": str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+def project_kanban(request, project_id: int, token):
+    project = get_object_or_404(Project, id=project_id)
+
+    # 1. Проверка токена (секретная ссылка)
+    if project.kanban_token != token:
+        raise Http404()
+
+    user = request.user
+    if not user.is_authenticated:
+        raise Http404()
+
+    # 2. Проверка доступа
+    if user.is_superuser or user.is_admin_role():
+        pass
+    elif user.is_pm():
+        if project.responsible_id != user.id:
+            raise Http404()
+    elif user.is_dev():
+        try:
+            developer = user.developer_profile
+            if not project.developers.filter(id=developer.id).exists():
+                raise Http404()
+        except Exception:
+            raise Http404()
+    else:
+        raise Http404()
+
+    return render(
+        request,
+        "crm/kanban.html",
+        {"project": project},
+    )
+
+
+@api_view(["GET"])
+def kanban_state(request, project_id):
+    project = get_object_or_404(Project, id=project_id)
+
+    # проверка доступа (ТОЧНО та же логика, что и раньше)
+    user = request.user
+    if not user.is_authenticated:
+        return Response(status=403)
+
+    if not (
+        user.is_superuser
+        or user.is_admin_role()
+        or (user.is_pm() and project.responsible_id == user.id)
+        or (
+            user.is_dev()
+            and project.developers.filter(id=user.developer_profile.id).exists()
+        )
+    ):
+        return Response(status=403)
+
+    ensure_kanban_columns(project)
+
+    columns = KanbanColumn.objects.filter(project=project)
+    tasks = KanbanTask.objects.filter(project=project)
+
+    return Response({
+        "columns": KanbanColumnSerializer(columns, many=True).data,
+        "tasks": KanbanTaskSerializer(tasks, many=True).data,
+    })
+
+@api_view(["POST"])
+def kanban_task_create(request):
+    project_id = request.data.get("project")
+    title = request.data.get("title")
+    status_code = request.data.get("status")
+    order = request.data.get("order", 0)
+    description = request.data.get("description", "")
+
+    if not project_id or not title or not status_code:
+        return Response(
+            {"detail": "project, title, status обязательны"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    project = get_object_or_404(Project, id=project_id)
+
+    # проверка доступа (ТОЧНО как у проекта)
+    user = request.user
+    if not user.is_authenticated:
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    if not (
+        user.is_superuser
+        or user.is_admin_role()
+        or (user.is_pm() and project.responsible_id == user.id)
+        or (
+            user.is_dev()
+            and project.developers.filter(id=user.developer_profile.id).exists()
+        )
+    ):
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+
+    # гарантируем наличие колонок
+    ensure_kanban_columns(project)
+
+    try:
+        column = KanbanColumn.objects.get(
+            project=project,
+            code=status_code
+        )
+    except KanbanColumn.DoesNotExist:
+        return Response(
+            {"detail": f"Unknown kanban status: {status_code}"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    task = KanbanTask.objects.create(
+        project=project,
+        column=column,
+        title=title,
+        description=description,
+        order=order,
+    )
+
+    return Response(
+        KanbanTaskSerializer(task).data,
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["POST"])
+def kanban_reorder(request):
+    project_id = request.data.get("project")
+    updates = request.data.get("updates", [])
+
+    project = get_object_or_404(Project, id=project_id)
+
+    # ✅ гарантируем наличие колонок
+    ensure_kanban_columns(project)
+
+    user = request.user
+    if not user.is_authenticated:
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    if not (
+        user.is_superuser
+        or user.is_admin_role()
+        or (user.is_pm() and project.responsible_id == user.id)
+        or (
+            user.is_dev()
+            and project.developers.filter(
+                id=user.developer_profile.id
+            ).exists()
+        )
+    ):
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    for item in updates:
+        task_id = item.get("id")
+        status_code = item.get("status")
+        order = item.get("order", 0)
+
+        if not task_id or not status_code:
+            continue
+
+        try:
+            task = KanbanTask.objects.get(id=task_id, project=project)
+            column = KanbanColumn.objects.get(project=project, code=status_code)
+        except (KanbanTask.DoesNotExist, KanbanColumn.DoesNotExist):
+            continue
+
+        task.column = column
+        task.order = order
+        task.save(update_fields=["column", "order"])
+
+    return Response({"detail": "ok"})
+
+
+
+
+@api_view(["PATCH"])
+def kanban_task_update(request, task_id):
+    task = get_object_or_404(KanbanTask, id=task_id)
+
+    # доступ по проекту
+    project = task.project
+    user = request.user
+
+    if not user.is_authenticated:
+        return Response(status=403)
+
+    if not (
+        user.is_superuser
+        or user.is_admin_role()
+        or (user.is_pm() and project.responsible_id == user.id)
+        or (
+            user.is_dev()
+            and project.developers.filter(id=user.developer_profile.id).exists()
+        )
+    ):
+        return Response(status=403)
+
+    serializer = KanbanTaskSerializer(task, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+
+    return Response(serializer.data)
+
+
+@api_view(["DELETE"])
+def kanban_task_delete(request, task_id):
+    task = get_object_or_404(KanbanTask, id=task_id)
+    project = task.project
+
+    user = request.user
+    if not user.is_authenticated:
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    if not (
+        user.is_superuser
+        or user.is_admin_role()
+        or (user.is_pm() and project.responsible_id == user.id)
+    ):
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    task.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)

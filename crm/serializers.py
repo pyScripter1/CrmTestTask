@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Project, Developer, ProjectDocument
+from .models import Project, Developer, ProjectDocument, KanbanTask, KanbanColumn
 import logging
 
 User = get_user_model()
@@ -148,3 +148,32 @@ class ProjectListSerializer(serializers.ModelSerializer):
 
     def get_developers_count(self, obj):
         return obj.developers.count()
+
+
+class KanbanColumnSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = KanbanColumn
+        fields = ("id", "code", "title", "order")
+
+
+
+class KanbanTaskSerializer(serializers.ModelSerializer):
+    status = serializers.CharField(
+        source="column.code",
+        read_only=True
+    )
+
+    class Meta:
+        model = KanbanTask
+        fields = (
+            "id",
+            "project",
+            "title",
+            "description",
+            "order",
+            "status",
+            "column",
+            "assignee",
+            "updated_at",
+        )
+

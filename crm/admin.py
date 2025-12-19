@@ -1,6 +1,7 @@
 from django.contrib import admin
+from django.utils.html import format_html
 
-from unfold.admin import ModelAdmin, TabularInline  # 👈 база из Unfold
+from unfold.admin import ModelAdmin, TabularInline  # база из Unfold
 
 from .models import Project, Developer, ProjectDocument
 
@@ -90,6 +91,8 @@ class ProjectAdmin(ModelAdmin):  # 👈 наследуемся от Unfold Model
     # 👉 крассивый виджет выбора разработчиков (Unfold + autocomplete_fields)
     autocomplete_fields = ('developers',)
 
+    readonly_fields = ("kanban_link",)
+
     inlines = [ProjectDocumentInline]
 
     # === Права доступа к модулю и объектам ===
@@ -118,6 +121,14 @@ class ProjectAdmin(ModelAdmin):  # 👈 наследуемся от Unfold Model
 
         # Остальные — ничего
         return ()
+
+    def kanban_link(self, obj):
+        if not obj:
+            return "-"
+        url = f"/projects/{obj.id}/kanban/{obj.kanban_token}/"
+        return format_html('<a href="{}" target="_blank">Открыть канбан</a>', url)
+
+    kanban_link.short_description = "Канбан"
 
     def has_module_permission(self, request):
         """
@@ -215,8 +226,9 @@ class ProjectAdmin(ModelAdmin):  # 👈 наследуемся от Unfold Model
         return qs.none()
 
     def get_fields(self, request, obj=None):
-        fields = super().get_fields(request, obj)
-        # Разраб не видит финансы (и старое поле documents, если оно вдруг появится)
+        fields = list(super().get_fields(request, obj))
+        if obj and "kanban_link" not in fields:
+            fields.insert(1, "kanban_link")
         if request.user.is_dev():
             forbidden = ('customer_name', 'total_cost', 'documents')
             return [f for f in fields if f not in forbidden]
