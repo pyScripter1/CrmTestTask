@@ -11,11 +11,11 @@ from django.db import transaction
 
 import logging
 
-from .models import Project, Developer, KanbanColumn, KanbanTask
+from .models import Project, Developer, KanbanColumn, KanbanTask, KanbanTaskHistory
 from .serializers import (
     ProjectAdminSerializer, ProjectPMSerializer, ProjectDeveloperSerializer, ProjectListSerializer,
     DeveloperAdminSerializer, DeveloperPMSerializer, DeveloperDeveloperSerializer, DeveloperListSerializer,
-    KanbanTaskSerializer, KanbanColumnSerializer
+    KanbanTaskSerializer, KanbanColumnSerializer, KanbanTaskHistorySerializer
 )
 from .permissions import (
     IsAdminRole, IsProjectManagerRole, IsDeveloperRole,
@@ -33,6 +33,19 @@ DEFAULT_KANBAN_COLUMNS = [
     ("blocked", "Заблокировано"),
     ("done", "Готово"),
 ]
+
+def log_task_history(*, project, task, user, action, from_column=None, to_column=None, old_data=None, new_data=None):
+    KanbanTaskHistory.objects.create(
+        project=project,
+        task=task,
+        user=user if user.is_authenticated else None,
+        action=action,
+        from_column=from_column,
+        to_column=to_column,
+        old_data=old_data,
+        new_data=new_data,
+    )
+
 
 def ensure_kanban_columns(project):
     """
@@ -437,6 +450,15 @@ def kanban_task_create(request):
         order=order,
     )
 
+    log_task_history(
+        project=project,
+        task=task,
+        user=request.user,
+        action=KanbanTaskHistory.ACTION_CREATE,
+        to_column=column.code,
+        new_data={"title": task.title, "description": task.description},
+    )
+
     return Response(
         KanbanTaskSerializer(task).data,
         status=status.HTTP_201_CREATED,
@@ -484,11 +506,45 @@ def kanban_reorder(request):
         except (KanbanTask.DoesNotExist, KanbanColumn.DoesNotExist):
             continue
 
+        # сохраняем старое состояние
+        old_status = task.column.code if task.column_id else None
+        old_order = task.order
+
+        # сохраняем новое состояние
         task.column = column
         task.order = order
         task.save(update_fields=["column", "order"])
 
+        new_status = column.code
+        new_order = order
+
+        # лог перемещения между колонками
+        if old_status != new_status:
+            log_task_history(
+                project=project,
+                task=task,
+                user=user,
+                action=KanbanTaskHistory.ACTION_MOVE,
+                from_column=old_status,
+                to_column=new_status,
+                new_data={"title": task.title},
+            )
+
+        # лог изменения порядка
+        elif old_order != new_order:
+            log_task_history(
+                project=project,
+                task=task,
+                user=user,
+                action=KanbanTaskHistory.ACTION_REORDER,
+                from_column=new_status,
+                to_column=new_status,
+                old_data={"order": old_order},
+                new_data={"order": new_order},
+            )
+
     return Response({"detail": "ok"})
+
 
 
 
@@ -515,11 +571,54 @@ def kanban_task_update(request, task_id):
     ):
         return Response(status=403)
 
+    # сохраняем старое состояние
+    old_data = {
+        "title": task.title,
+        "description": task.description,
+        "status": task.column.code if task.column_id else None,
+    }
+
     serializer = KanbanTaskSerializer(task, data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
     serializer.save()
 
+    # собираем новое состояние
+    new_data = {
+        "title": task.title,
+        "description": task.description,
+        "status": task.column.code if task.column_id else None,
+    }
+
+    # логируем перемещение
+    if old_data["status"] != new_data["status"]:
+        log_task_history(
+            project=project,
+            task=task,
+            user=user,
+            action=KanbanTaskHistory.ACTION_MOVE,
+            from_column=old_data["status"],
+            to_column=new_data["status"],
+            new_data={"title": task.title},
+        )
+
+    # логируем изменение текста
+    changed_fields = {
+        k for k in ("title", "description")
+        if old_data.get(k) != new_data.get(k)
+    }
+
+    if changed_fields:
+        log_task_history(
+            project=project,
+            task=task,
+            user=user,
+            action=KanbanTaskHistory.ACTION_UPDATE,
+            old_data={k: old_data[k] for k in changed_fields},
+            new_data={**{k: new_data[k] for k in changed_fields}, "title": task.title},
+        )
+
     return Response(serializer.data)
+
 
 
 @api_view(["DELETE"])
@@ -538,5 +637,56 @@ def kanban_task_delete(request, task_id):
     ):
         return Response(status=status.HTTP_403_FORBIDDEN)
 
+    log_task_history(
+        project=project,
+        task=task,
+        user=request.user,
+        action=KanbanTaskHistory.ACTION_DELETE,
+        from_column=task.column.code if task.column_id else None,
+        old_data={"title": task.title},
+    )
+
     task.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET"])
+def kanban_task_history(request, task_id: int):
+    task = get_object_or_404(KanbanTask, id=task_id)
+    project = task.project
+
+    user = request.user
+    if not user.is_authenticated:
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    # те же правила доступа, что в kanban_state
+    if not (
+        user.is_superuser
+        or user.is_admin_role()
+        or (user.is_pm() and project.responsible_id == user.id)
+        or (user.is_dev() and project.developers.filter(id=user.developer_profile.id).exists())
+    ):
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    qs = KanbanTaskHistory.objects.filter(task=task).order_by("-created_at")[:200]
+    return Response(KanbanTaskHistorySerializer(qs, many=True).data)
+
+
+@api_view(["GET"])
+def kanban_project_activity(request, project_id: int):
+    project = get_object_or_404(Project, id=project_id)
+
+    user = request.user
+    if not user.is_authenticated:
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    if not (
+        user.is_superuser
+        or user.is_admin_role()
+        or (user.is_pm() and project.responsible_id == user.id)
+        or (user.is_dev() and project.developers.filter(id=user.developer_profile.id).exists())
+    ):
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    qs = KanbanTaskHistory.objects.filter(project=project).order_by("-created_at")[:300]
+    return Response(KanbanTaskHistorySerializer(qs, many=True).data)
