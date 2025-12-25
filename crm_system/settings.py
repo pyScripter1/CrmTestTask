@@ -132,7 +132,14 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = '/static/'
-STATIC_ROOT = "/var/www/crm/staticfiles/"
+
+# где Django ИЩЕТ статику в проекте (dev + prod)
+STATICFILES_DIRS = [
+    BASE_DIR / 'crm' / 'static',
+]
+
+# куда Django СОБИРАЕТ статику (ТОЛЬКО prod)
+STATIC_ROOT = '/var/www/crm/staticfiles/'
 
 # settings.py
 
