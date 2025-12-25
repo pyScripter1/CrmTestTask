@@ -184,3 +184,67 @@ class KanbanTask(models.Model):
 
     def __str__(self):
         return self.title
+
+
+
+
+class KanbanTaskHistory(models.Model):
+    ACTION_CREATE = "create"
+    ACTION_UPDATE = "update"
+    ACTION_MOVE = "move"
+    ACTION_REORDER = "reorder"
+    ACTION_DELETE = "delete"
+
+    ACTION_CHOICES = (
+        (ACTION_CREATE, "Create"),
+        (ACTION_UPDATE, "Update"),
+        (ACTION_MOVE, "Move"),
+        (ACTION_REORDER, "Reorder"),
+        (ACTION_DELETE, "Delete"),
+    )
+
+    project = models.ForeignKey(
+        "crm.Project",
+        on_delete=models.CASCADE,
+        related_name="kanban_activity",
+    )
+    task = models.ForeignKey(
+        "crm.KanbanTask",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="history",
+        verbose_name="Задача канбана",
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="kanban_actions",
+    )
+
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+
+    # Для move/reorder удобно видеть из/в какую колонку
+    from_column = models.CharField(max_length=50, null=True, blank=True)
+    to_column = models.CharField(max_length=50, null=True, blank=True)
+
+    # Для update — что поменяли
+    old_data = models.JSONField(null=True, blank=True)
+    new_data = models.JSONField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["project", "-created_at"]),
+            models.Index(fields=["task", "-created_at"]),
+        ]
+
+    def __str__(self):
+        task_part = f"task={self.task_id}" if self.task_id else "task=deleted"
+        return f"{self.project_id}:{task_part} {self.action} {self.created_at}"
+
