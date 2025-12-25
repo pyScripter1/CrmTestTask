@@ -91,9 +91,13 @@ class ProjectAdmin(ModelAdmin):  # 👈 наследуемся от Unfold Model
     # 👉 крассивый виджет выбора разработчиков (Unfold + autocomplete_fields)
     autocomplete_fields = ('developers',)
 
-    readonly_fields = ("kanban_link",)
+    readonly_fields = ("kanban_link", )
 
     inlines = [ProjectDocumentInline]
+
+    @admin.display(description="Ответственный")
+    def responsible_plain(self, obj):
+        return str(obj.responsible) if obj and obj.responsible else "—"
 
     # === Права доступа к модулю и объектам ===
 
@@ -227,11 +231,18 @@ class ProjectAdmin(ModelAdmin):  # 👈 наследуемся от Unfold Model
 
     def get_fields(self, request, obj=None):
         fields = list(super().get_fields(request, obj))
+
         if obj and "kanban_link" not in fields:
             fields.insert(1, "kanban_link")
+
+        # DEV: убираем кликабельный FK responsible и показываем текст
+        if request.user.is_dev() and obj:
+            fields = ["responsible_plain" if f == "responsible" else f for f in fields]
+
         if request.user.is_dev():
-            forbidden = ('customer_name', 'total_cost', 'documents')
-            return [f for f in fields if f not in forbidden]
+            forbidden = ("customer_name", "total_cost", "documents")
+            fields = [f for f in fields if f not in forbidden]
+
         return fields
 
     def get_inline_instances(self, request, obj=None):
@@ -250,6 +261,12 @@ class DeveloperAdmin(ModelAdmin):  # 👈 тоже на базе Unfold
     list_display = ('full_name', 'position', 'cooperation_format', 'salary')
     list_filter = ('cooperation_format', 'position')
     search_fields = ('full_name', 'position', 'competencies')
+    readonly_fields = ("user_plain",)
+
+    @admin.display(description="Пользователь")
+    def user_plain(self, obj):
+        return str(obj.user) if obj and obj.user else "—"
+
 
     # === Права доступа к модулю и объектам ===
 
@@ -353,13 +370,21 @@ class DeveloperAdmin(ModelAdmin):  # 👈 тоже на базе Unfold
         return qs.none()
 
     def get_fields(self, request, obj=None):
-        fields = super().get_fields(request, obj)
+        fields = list(super().get_fields(request, obj))
+
+        # PM/DEV: заменяем поле user (FK-ссылка) на user_plain (обычный текст)
+        if obj and (request.user.is_pm() or request.user.is_dev()):
+            fields = ["user_plain" if f == "user" else f for f in fields]
+
         # PM не видит паспортные и контакты
         if request.user.is_pm():
-            forbidden = ('passport_data', 'contacts')
-            return [f for f in fields if f not in forbidden]
+            forbidden = ("passport_data", "contacts")
+            fields = [f for f in fields if f not in forbidden]
+
         # DEV не видит паспорт, з/п, контакты
         if request.user.is_dev():
-            forbidden = ('passport_data', 'salary', 'contacts')
-            return [f for f in fields if f not in forbidden]
+            forbidden = ("passport_data", "salary", "contacts")
+            fields = [f for f in fields if f not in forbidden]
+
         return fields
+
