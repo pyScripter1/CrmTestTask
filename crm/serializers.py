@@ -1,7 +1,10 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import Project, Developer, ProjectDocument, KanbanTask, KanbanColumn
+from .models import KanbanTaskHistory
+
 import logging
+
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -177,3 +180,29 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
+
+class KanbanTaskHistorySerializer(serializers.ModelSerializer):
+    user_display = serializers.SerializerMethodField()
+    task = serializers.PrimaryKeyRelatedField(read_only=True, allow_null=True)
+
+
+    class Meta:
+        model = KanbanTaskHistory
+        fields = (
+            "id",
+            "project",
+            "task",
+            "action",
+            "from_column",
+            "to_column",
+            "old_data",
+            "new_data",
+            "created_at",
+            "user_display",
+        )
+
+    def get_user_display(self, obj):
+        if not obj.user:
+            return "System"
+        # можно улучшить под твою модель User
+        return getattr(obj.user, "email", None) or str(obj.user)
