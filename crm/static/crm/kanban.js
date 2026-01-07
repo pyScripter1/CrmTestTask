@@ -33,7 +33,9 @@ STATUSES.forEach(s => {
   const modalTitleEl = document.getElementById('modal-title');
   const titleInput = /** @type {HTMLInputElement} */ (formEl.elements.namedItem('title'));
   const descInput = /** @type {HTMLTextAreaElement} */ (formEl.elements.namedItem('description'));
+  const deadlineInput = /** @type {HTMLInputElement} */ (formEl.elements.namedItem('deadline'));
   const statusSelect = /** @type {HTMLSelectElement} */ (formEl.elements.namedItem('status'));
+  const assigneeSelect = /** @type {HTMLSelectElement} */ (formEl.elements.namedItem('assignee'));
   const errorEl = document.getElementById('form-error');
 
   // project_id берём из data-project-id="{{ project.id }}" на #board
@@ -51,10 +53,13 @@ STATUSES.forEach(s => {
   const API_REORDER_URL = `/api/kanban/reorder/`;
   const API_PROJECT_ACTIVITY_URL = `/api/kanban/project/${projectId}/activity/`;
   const API_TASK_HISTORY_URL = (taskId) => `/api/kanban/task/${taskId}/history/`;
+  const API_ASSIGNEES_URL = `/api/kanban/${projectId}/assignees/`;
+
 
 
   // ====== State (теперь источник истины — сервер) ======
   let state = defaultState(); // локально держим только для рендера
+  let assigneeOptions = null;
   const titleCache = Object.create(null);
   let modalCtx = { mode: 'create', cardId: null };
   let pollingTimer = null;
@@ -65,6 +70,8 @@ STATUSES.forEach(s => {
     buildBoardSkeleton();
     populateStatusSelect();
     attachEvents();
+    loadAssignees();
+
 
     // начальная загрузка + polling (real-time)
     loadKanbanFromServer();
@@ -135,6 +142,29 @@ STATUSES.forEach(s => {
       .join('');
   }
 
+  async function loadAssignees() {
+      try {
+        const resp = await fetch(API_ASSIGNEES_URL, { credentials: 'same-origin' });
+        if (!resp.ok) throw new Error('assignees failed');
+        assigneeOptions = await resp.json();
+        populateAssigneeSelect();
+      } catch (e) {
+        console.error(e);
+        assigneeOptions = [{ value: "", label: "—" }, { value: "customer", label: "Заказчик" }];
+        populateAssigneeSelect();
+      }
+    }
+
+    function populateAssigneeSelect(selectedValue = "") {
+      if (!assigneeSelect) return;
+      const opts = Array.isArray(assigneeOptions) ? assigneeOptions : [];
+      assigneeSelect.innerHTML = opts
+        .map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`)
+        .join('');
+      assigneeSelect.value = selectedValue || "";
+    }
+
+
   // ====== Click handlers ======
   function onBoardClick(e) {
     const btn = e.target.closest('button[data-action]');
@@ -177,10 +207,14 @@ STATUSES.forEach(s => {
 
     formEl.reset();
     statusSelect.value = status;
+    populateAssigneeSelect("");
+
 
     showModal();
     taskHistoryBox.style.display = 'none';
     taskHistoryList.innerHTML = '';
+    deadlineInput.value = "";
+
 
   }
 
@@ -195,6 +229,10 @@ STATUSES.forEach(s => {
     titleInput.value = card.title || '';
     descInput.value = card.description || '';
     statusSelect.value = card.status || 'queue';
+    populateAssigneeSelect(card.assignee_value || "");
+    deadlineInput.value = card.deadline || "";
+
+
 
     showModal();
     loadTaskHistory(cardId);
@@ -326,6 +364,13 @@ function renderHistory(items, mode = 'task') {
     const title = titleInput.value.trim();
     const description = descInput.value.trim();
     const status = statusSelect.value;
+    const assignee = assigneeSelect ? assigneeSelect.value : "";
+    const deadline = deadlineInput && deadlineInput.value
+        ? deadlineInput.value
+        : null;
+
+
+
 
     if (!title) {
       errorEl.textContent = 'Пожалуйста, заполните заголовок.';
@@ -339,14 +384,14 @@ function renderHistory(items, mode = 'task') {
 
     try {
       if (modalCtx.mode === 'create') {
-        await apiCreateTask({ title, description, status });
+        await apiCreateTask({ title, description, status, assignee, deadline });
         closeModal();
         await loadKanbanFromServer();
         return;
       }
 
       if (modalCtx.mode === 'edit' && modalCtx.cardId) {
-        await apiPatchTask(modalCtx.cardId, { title, description, status });
+        await apiPatchTask(modalCtx.cardId, { title, description, status, assignee, deadline });
         closeModal();
         await loadKanbanFromServer();
       }
@@ -447,6 +492,31 @@ function closeActivity() {
       desc.className = 'card__desc';
       desc.textContent = card.description;
       el.appendChild(desc);
+    }
+
+    if (card.assignee_display && card.assignee_display !== "—") {
+      const meta = document.createElement('div');
+      meta.className = 'card__meta';
+      meta.textContent = `Исполнитель: ${card.assignee_display}`;
+      el.appendChild(meta);
+    }
+
+    if (card.deadline) {
+      const deadlineEl = document.createElement('div');
+      deadlineEl.className = 'card__deadline';
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const deadlineDate = new Date(card.deadline);
+      deadlineDate.setHours(0, 0, 0, 0);
+
+          if (deadlineDate < today) {
+            deadlineEl.classList.add('overdue');
+          }
+
+      deadlineEl.textContent = `Дедлайн: ${deadlineDate.toLocaleDateString()}`;
+      el.appendChild(deadlineEl);
     }
 
     const actions = document.createElement('div');
@@ -608,13 +678,18 @@ function closeActivity() {
       const status = isValidStatus(t.status) ? t.status : 'queue';
 
       next.cards[id] = {
-        id,
-        title: t.title || '',
-        description: t.description || '',
-        status,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+          id,
+          title: t.title || '',
+          description: t.description || '',
+          status,
+          deadline: t.deadline || null,
+          assignee_value: t.assignee_value || "",
+          assignee_display: t.assignee_display || "",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
       };
+
+
       titleCache[id] = next.cards[id].title;
       next.order[status].push(id);
     }
@@ -624,12 +699,22 @@ function closeActivity() {
     renderAllColumns();
   }
 
-  async function apiCreateTask({ title, description, status }) {
-    return fetchJson(API_TASK_CREATE_URL, {
-      method: 'POST',
-      body: JSON.stringify({ project: Number(projectId), title, description, status, order: 0 }),
-    });
-  }
+  async function apiCreateTask({ title, description, status, assignee, deadline }) {
+      return fetchJson(API_TASK_CREATE_URL, {
+        method: 'POST',
+        body: JSON.stringify({
+          project: Number(projectId),
+          title,
+          description,
+          status,
+          assignee,
+          deadline,
+          order: 0,
+        }),
+      });
+    }
+
+
 
   async function apiPatchTask(taskId, payload) {
     return fetchJson(API_TASK_URL(taskId), {

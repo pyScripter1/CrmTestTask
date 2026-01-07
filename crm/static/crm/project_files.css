@@ -1,0 +1,167 @@
+.files-page {
+  max-width: 1100px;
+  margin: 24px auto;
+  padding: 0 16px;
+  color: #e5e7eb;
+}
+
+/* Dropzone */
+
+.dropzone {
+  border: 2px dashed #334155;
+  border-radius: 14px;
+  padding: 28px;
+  text-align: center;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: 0.15s ease;
+  margin-bottom: 24px;
+}
+
+.dropzone.hover {
+  background: #0f172a;
+  border-color: #6366f1;
+  color: #c7d2fe;
+}
+
+/* Tree */
+
+.file-tree {
+  font-size: 0.95rem;
+}
+
+.folder {
+  margin-left: 16px;
+  border-left: 2px solid #1e293b;
+  padding-left: 10px;
+  margin-bottom: 6px;
+}
+
+.folder-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  color: #c7d2fe;
+}
+
+.folder-header:hover {
+  color: #ffffff;
+}
+
+.folder-children {
+  margin-top: 6px;
+}
+
+.file {
+  display: block;
+  margin-left: 22px;
+  color: #9ecbff;
+  text-decoration: none;
+  margin-bottom: 4px;
+}
+
+.file:hover {
+  text-decoration: underline;
+}
+
+.folder-header.selected {
+  background: #e3f2fd;
+}
+
+.folder-children.collapsed {
+  display: none;
+}
+
+/* ================= FILES & FOLDERS UI (SOFT HOVER) ================= */
+
+/* ---- File row layout ---- */
+.file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-radius: 6px;
+  gap: 8px;
+}
+
+/* МЯГКИЙ hover — чуть ярче фона страницы */
+.file-row:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+/* ---- File name ---- */
+.file-name a {
+  color: #ссс; /* темно-серый, хорошо читается */
+  text-decoration: none;
+}
+
+.file-name a:hover {
+  text-decoration: underline;
+}
+
+/* ---- Folder header layout ---- */
+.folder-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #aaa;
+}
+
+/* МЯГКИЙ hover для папок */
+.folder-header:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* ---- Selected folder (чуть заметнее hover) ---- */
+.folder-header.selected {
+  background: rgba(59, 130, 246, 0.12); /* мягкий синий */
+}
+
+/* ---- Delete buttons ---- */
+.file-delete,
+.folder-delete {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.5;
+}
+
+/* чуть заметнее при наведении */
+.file-delete:hover,
+.folder-delete:hover {
+  opacity: 0.9;
+}
+
+/* ---- Hide delete icons until hover ---- */
+.file-delete,
+.folder-delete {
+  visibility: hidden;
+}
+
+.file-row:hover .file-delete,
+.folder-header:hover .folder-delete {
+  visibility: visible;
+}
+
+/* ---- Folder children spacing ---- */
+.folder-children {
+  margin-left: 16px;
+}
+
+/* ---- Collapsed folders ---- */
+.folder-children.collapsed {
+  display: none;
+}
+
+/* ---- Root folder ---- */
+.folder-header.root {
+  font-weight: 600;
+}
