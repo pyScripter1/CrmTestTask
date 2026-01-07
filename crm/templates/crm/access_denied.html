@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  {% load static %}
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <link rel="stylesheet" href="{% static 'crm/kanban.css' %}">
+  <link rel="stylesheet" href="{% static 'crm/project_files.css' %}">
+
+  <style>
+    .deny-wrap{
+      max-width: 760px;
+      margin: 40px auto;
+      padding: 24px;
+      border: 1px solid #d1d5db;
+      border-radius: 16px;
+      background: #0f172a;
+    }
+    .deny-title{
+      margin: 0 0 8px 0;
+      font-size: 20px;
+    }
+    .deny-msg{
+      margin: 0 0 12px 0;
+      color: #fff;
+      line-height: 1.5;
+    }
+    .deny-hint{
+      margin: 0;
+      color: #6b7280;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .deny-actions{
+      margin-top: 16px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+  </style>
+</head>
+
+<body>
+  <header class="topbar">
+    <div class="topbar__left">
+      <h1>{{ title }}</h1>
+    </div>
+  </header>
+
+  <main class="files-page">
+    <div class="deny-wrap">
+      <h2 class="deny-title">{{ title }}</h2>
+      <p class="deny-msg">{{ message }}</p>
+      {% if hint %}
+        <p class="deny-hint">{{ hint }}</p>
+      {% endif %}
+
+
+    </div>
+  </main>
+</body>
+</html>

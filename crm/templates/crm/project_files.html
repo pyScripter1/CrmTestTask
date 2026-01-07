@@ -1,10 +1,52 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
+  {% load static %}
+  <meta charset="utf-8">
+  <title>Файлы проекта — {{ project.name }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <link rel="stylesheet" href="{% static 'crm/kanban.css' %}">
+  <link rel="stylesheet" href="{% static 'crm/project_files.css' %}">
+
+  <script>
+    const PROJECT_UUID = "{{ project.files_token }}";
+  </script>
 </head>
+
 <body>
-$END$
+
+<header class="topbar">
+  <div class="topbar__left">
+    <h1>Файлы проекта — {{ project.name }}</h1>
+  </div>
+  <div class="topbar__right">
+  {% if can_manage_files %}
+    <button id="create-root-folder" class="btn">➕ Папка</button>
+  {% endif %}
+</div>
+
+</header>
+
+<main class="files-page">
+
+  {% if can_manage_files %}
+  <div id="dropzone" class="dropzone">
+    <strong>Перетащите файлы сюда</strong><br>
+    или нажмите для выбора
+    <input id="file-input" type="file" multiple hidden>
+  </div>
+{% endif %}
+
+<div id="select-root" class="folder-header root">
+  📁 Корень
+</div>
+
+
+  <div id="file-tree" class="file-tree"></div>
+
+</main>
+
+<script src="{% static 'crm/project_files.js' %}"></script>
 </body>
 </html>
