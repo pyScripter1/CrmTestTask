@@ -1,6 +1,7 @@
 from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator, FileExtensionValidator
+from django.utils import timezone
 
 import uuid
 
@@ -73,7 +74,7 @@ class Project(models.Model):
         verbose_name="Этапы проекта",
         help_text="Введите этапы проекта по порядку"
     )
-    active_stage = models.CharField(max_length=255, blank=True, default='', verbose_name="Текущий этап")
+    active_stage = models.TextField(blank=True, default='', verbose_name="Текущий этап")
     comments = models.TextField(blank=True, default='', verbose_name="Комментарии")
 
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
@@ -87,6 +88,13 @@ class Project(models.Model):
         verbose_name="Токен канбана",
     )
 
+    files_token = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        db_index=True,
+    )
+
     class Meta:
         ordering = ['-created_at']
         verbose_name = 'Проект'
@@ -96,32 +104,110 @@ class Project(models.Model):
         return self.name
 
 
-# Новая модель для множества файлов
+# # Новая модель для множества файлов
+# class ProjectDocument(models.Model):
+#     project = models.ForeignKey(
+#         Project, on_delete=models.CASCADE,
+#         related_name='documents', verbose_name="Проект"
+#     )
+#
+#     file = models.FileField(
+#         upload_to='project_documents/',
+#         validators=[FileExtensionValidator(
+#             allowed_extensions=['pdf', 'doc', 'docx', 'txt', 'xls', 'xlsx', 'zip', 'rar']
+#         )],
+#         verbose_name="Файл",
+#         help_text="Допустимые форматы: pdf, doc, docx, txt, xls, xlsx, zip, rar"
+#     )
+#
+#     uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата загрузки")
+#
+#     class Meta:
+#         ordering = ['-uploaded_at']
+#         verbose_name = "Документ проекта"
+#         verbose_name_plural = "Документы проекта"
+#
+#     def __str__(self):
+#         return f"{self.project.name} — {self.file.name}"
 
-class ProjectDocument(models.Model):
+# Модель для папок проекта
+class ProjectFolder(models.Model):
+    uuid = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False
+    )
+
     project = models.ForeignKey(
-        Project, on_delete=models.CASCADE,
-        related_name='documents', verbose_name="Проект"
+        "Project",
+        on_delete=models.CASCADE,
+        related_name="folders"
     )
 
-    file = models.FileField(
-        upload_to='project_documents/',
-        validators=[FileExtensionValidator(
-            allowed_extensions=['pdf', 'doc', 'docx', 'txt', 'xls', 'xlsx', 'zip', 'rar']
-        )],
-        verbose_name="Файл",
-        help_text="Допустимые форматы: pdf, doc, docx, txt, xls, xlsx, zip, rar"
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        related_name="children",
+        on_delete=models.CASCADE
     )
 
-    uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата загрузки")
+    name = models.CharField(max_length=255)
+
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-uploaded_at']
-        verbose_name = "Документ проекта"
-        verbose_name_plural = "Документы проекта"
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "parent", "name"],
+                name="unique_folder_per_level"
+            )
+        ]
 
     def __str__(self):
-        return f"{self.project.name} — {self.file.name}"
+        return self.name
+
+# Модель для файлов проекта
+class ProjectFile(models.Model):
+    uuid = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False
+    )
+
+    project = models.ForeignKey(
+        "Project",
+        on_delete=models.CASCADE,
+        related_name="files"
+    )
+
+    folder = models.ForeignKey(
+        ProjectFolder,
+        null=True,
+        blank=True,
+        related_name="files",
+        on_delete=models.CASCADE
+    )
+
+    file = models.FileField(upload_to="project_files/")
+
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def filename(self):
+        return self.file.name.split("/")[-1]
+
+    def __str__(self):
+        return self.filename()
+
+
 
 # новые модели, для изоляции каждой доски для своего проекта
 class KanbanColumn(models.Model):
@@ -153,6 +239,12 @@ class KanbanColumn(models.Model):
 
 
 class KanbanTask(models.Model):
+    class AssigneeKind(models.TextChoices):
+        NONE = "none", "—"
+        DEVELOPER = "developer", "Разработчик"
+        USER = "user", "Пользователь"
+        CUSTOMER = "customer", "Заказчик"
+
     project = models.ForeignKey(
         Project,
         on_delete=models.CASCADE,
@@ -168,14 +260,41 @@ class KanbanTask(models.Model):
     title = models.CharField(max_length=255, verbose_name="Заголовок")
     description = models.TextField(blank=True, verbose_name="Описание")
     order = models.PositiveIntegerField(default=0, verbose_name="Порядок")
-    assignee = models.ForeignKey(
+
+    # NEW: тип исполнителя
+    assignee_kind = models.CharField(
+        max_length=16,
+        choices=AssigneeKind.choices,
+        default=AssigneeKind.NONE,
+        verbose_name="Тип исполнителя",
+    )
+
+    # NEW: разработчик (это твой старый assignee)
+    assignee_developer = models.ForeignKey(
         Developer,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        verbose_name="Исполнитель",
+        verbose_name="Исполнитель (разработчик)",
     )
+
+    # NEW: пользователь (например PM/ответственный)
+    assignee_user = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="kanban_assigned_tasks",
+        verbose_name="Исполнитель (пользователь)",
+    )
+
     updated_at = models.DateTimeField(auto_now=True)
+
+    deadline = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Дедлайн задачи",
+    )
 
     class Meta:
         ordering = ["order"]
@@ -184,6 +303,19 @@ class KanbanTask(models.Model):
 
     def __str__(self):
         return self.title
+
+    def get_assignee_display(self) -> str:
+        """
+        Текст для UI/истории.
+        """
+        if self.assignee_kind == self.AssigneeKind.CUSTOMER:
+            return "Заказчик"
+        if self.assignee_kind == self.AssigneeKind.USER and self.assignee_user_id:
+            return (self.assignee_user.get_full_name() or self.assignee_user.username or str(self.assignee_user))
+        if self.assignee_kind == self.AssigneeKind.DEVELOPER and self.assignee_developer_id:
+            return self.assignee_developer.full_name or str(self.assignee_developer)
+        return "—"
+
 
 
 
