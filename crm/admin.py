@@ -3,75 +3,7 @@ from django.utils.html import format_html
 
 from unfold.admin import ModelAdmin, TabularInline  # база из Unfold
 
-from .models import Project, Developer, ProjectDocument
-
-
-# === Inline для множества документов ===
-class ProjectDocumentInline(TabularInline):
-    model = ProjectDocument
-    extra = 1
-
-    # ---- Права на inline-модель документов ----
-    def has_view_permission(self, request, obj=None):
-        """
-        Документы видят:
-        - Admin (роль ADMIN или superuser)
-        - PM (менеджер проекта)
-        Разработчик не видит вообще.
-        """
-        user = request.user
-        if not user or not user.is_authenticated:
-            return False
-        if user.is_superuser or getattr(user, "is_admin_role", lambda: False)():
-            return True
-        if getattr(user, "is_pm", lambda: False)():
-            return True
-        return False
-
-    def has_add_permission(self, request, obj=None):
-        """
-        Добавлять документы могут:
-        - Admin
-        - PM
-        """
-        user = request.user
-        if not user or not user.is_authenticated:
-            return False
-        if user.is_superuser or getattr(user, "is_admin_role", lambda: False)():
-            return True
-        if getattr(user, "is_pm", lambda: False)():
-            return True
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        """
-        Редактировать документы могут:
-        - Admin
-        - PM
-        """
-        user = request.user
-        if not user or not user.is_authenticated:
-            return False
-        if user.is_superuser or getattr(user, "is_admin_role", lambda: False)():
-            return True
-        if getattr(user, "is_pm", lambda: False)():
-            return True
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        """
-        Удалять документы могут:
-        - Admin
-        - PM
-        """
-        user = request.user
-        if not user or not user.is_authenticated:
-            return False
-        if user.is_superuser or getattr(user, "is_admin_role", lambda: False)():
-            return True
-        if getattr(user, "is_pm", lambda: False)():
-            return True
-        return False
+from .models import Project, Developer
 
 
 @admin.register(Project)
@@ -91,9 +23,10 @@ class ProjectAdmin(ModelAdmin):  # 👈 наследуемся от Unfold Model
     # 👉 крассивый виджет выбора разработчиков (Unfold + autocomplete_fields)
     autocomplete_fields = ('developers',)
 
-    readonly_fields = ("kanban_link", )
+    readonly_fields = ("kanban_link", "files_link")
 
-    inlines = [ProjectDocumentInline]
+    list_display_links = list_display
+
 
     @admin.display(description="Ответственный")
     def responsible_plain(self, obj):
@@ -127,12 +60,62 @@ class ProjectAdmin(ModelAdmin):  # 👈 наследуемся от Unfold Model
         return ()
 
     def kanban_link(self, obj):
-        if not obj:
-            return "-"
+        # Проект ещё не сохранён (нет id)
+        if not obj or not obj.pk:
+            return format_html(
+                '<span style="color: #999;">'
+                'Сохраните проект, чтобы открыть канбан'
+                '</span>'
+            )
+
         url = f"/projects/{obj.id}/kanban/{obj.kanban_token}/"
-        return format_html('<a href="{}" target="_blank">Открыть канбан</a>', url)
+        return format_html(
+            """
+            <a href="{url}" target="_blank" style="
+                display: block;
+                padding: 14px 16px;
+                border: 1px solid #d1d5db;
+                border-radius: 12px;
+                background:#0f172a;
+                text-decoration: none;
+                color: inherit;
+                transition: background 0.15s ease;
+            ">
+                <div style="font-size: 14px;">
+                    Открыть Канбан
+                </div>
+            </a>
+            """,
+            url=url
+        )
 
     kanban_link.short_description = "Канбан"
+
+    def files_link(self, obj):
+        if not obj or not obj.pk:
+            return "Сохраните проект"
+
+        return format_html(
+            """
+            <a href="/projects/{uuid}/files/" target="_blank" style="
+                display:block;
+                padding:14px 16px;
+                border:1px solid #d1d5db;
+                border-radius:12px;
+                background:#0f172a;
+                text-decoration:none;
+                color:inherit;
+            ">
+                <div style="font-weight:600;">Файлы проекта</div>
+                <div style="font-size:12px;color:#6b7280;">
+                    Папки и документы проекта
+                </div>
+            </a>
+            """,
+            uuid=obj.files_token,
+        )
+
+    files_link.short_description = "Файлы"
 
     def has_module_permission(self, request):
         """
