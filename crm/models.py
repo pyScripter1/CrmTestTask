@@ -104,31 +104,6 @@ class Project(models.Model):
         return self.name
 
 
-# # Новая модель для множества файлов
-# class ProjectDocument(models.Model):
-#     project = models.ForeignKey(
-#         Project, on_delete=models.CASCADE,
-#         related_name='documents', verbose_name="Проект"
-#     )
-#
-#     file = models.FileField(
-#         upload_to='project_documents/',
-#         validators=[FileExtensionValidator(
-#             allowed_extensions=['pdf', 'doc', 'docx', 'txt', 'xls', 'xlsx', 'zip', 'rar']
-#         )],
-#         verbose_name="Файл",
-#         help_text="Допустимые форматы: pdf, doc, docx, txt, xls, xlsx, zip, rar"
-#     )
-#
-#     uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата загрузки")
-#
-#     class Meta:
-#         ordering = ['-uploaded_at']
-#         verbose_name = "Документ проекта"
-#         verbose_name_plural = "Документы проекта"
-#
-#     def __str__(self):
-#         return f"{self.project.name} — {self.file.name}"
 
 # Модель для папок проекта
 class ProjectFolder(models.Model):
