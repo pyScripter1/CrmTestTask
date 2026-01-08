@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Project, Developer, ProjectDocument, KanbanTask, KanbanColumn
+from .models import Project, Developer, KanbanTask, KanbanColumn, ProjectFolder, ProjectFile
 from .models import KanbanTaskHistory
 
 import logging
@@ -17,12 +17,6 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'role']
 
 
-# === Документы (read-only) ===
-class ProjectDocumentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProjectDocument
-        fields = ['id', 'file', 'uploaded_at']
-        read_only_fields = ['id', 'uploaded_at']
 
 
 # ========== Developer Serializers (без изменений) ==========
@@ -84,7 +78,6 @@ class DeveloperDeveloperSerializer(serializers.ModelSerializer):
 class ProjectBaseSerializer(serializers.ModelSerializer):
     responsible_details = UserSerializer(source='responsible', read_only=True)
     developers_count = serializers.SerializerMethodField()
-    documents = ProjectDocumentSerializer(many=True, read_only=True)
 
     class Meta:
         model = Project
@@ -117,7 +110,6 @@ class ProjectPMSerializer(ProjectBaseSerializer):
 class ProjectDeveloperSerializer(serializers.ModelSerializer):
     responsible_details = UserSerializer(source='responsible', read_only=True)
     developers_count = serializers.SerializerMethodField()
-    documents = ProjectDocumentSerializer(many=True, read_only=True)
 
     class Meta:
         model = Project
@@ -161,10 +153,21 @@ class KanbanColumnSerializer(serializers.ModelSerializer):
 
 
 class KanbanTaskSerializer(serializers.ModelSerializer):
-    status = serializers.CharField(
-        source="column.code",
-        read_only=True
+    status = serializers.CharField(source="column.code", read_only=True)
+
+    # ВХОД: строка-токен ("customer", "user:1", "dev:2", "")
+    assignee = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
     )
+
+    # ВЫХОД: чтобы JS мог выставить select при edit
+    assignee_value = serializers.SerializerMethodField(read_only=True)
+
+    # ВЫХОД: чтобы показать на карточке
+    assignee_display = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = KanbanTask
@@ -176,9 +179,85 @@ class KanbanTaskSerializer(serializers.ModelSerializer):
             "order",
             "status",
             "column",
-            "assignee",
+            "deadline",
+            "assignee",          # write-only token
+            "assignee_value",    # read-only token
+            "assignee_display",  # read-only text
             "updated_at",
         )
+
+    def get_assignee_display(self, obj: KanbanTask) -> str:
+        return obj.get_assignee_display()
+
+    def get_assignee_value(self, obj: KanbanTask) -> str:
+        if obj.assignee_kind == getattr(KanbanTask, "AssigneeKind").CUSTOMER:
+            return "customer"
+        if obj.assignee_kind == getattr(KanbanTask, "AssigneeKind").USER and obj.assignee_user_id:
+            return f"user:{obj.assignee_user_id}"
+        if obj.assignee_kind == getattr(KanbanTask, "AssigneeKind").DEVELOPER and obj.assignee_developer_id:
+            return f"dev:{obj.assignee_developer_id}"
+        return ""
+
+    def _apply_assignee_token(self, task: KanbanTask, token: str):
+        """
+        Применяем token к задаче + валидируем, что исполнитель связан с проектом.
+        """
+        token = (token or "").strip()
+
+        # сброс
+        task.assignee_kind = KanbanTask.AssigneeKind.NONE
+        task.assignee_user = None
+        task.assignee_developer = None
+
+        if token == "" or token == "none":
+            return
+
+        if token == "customer":
+            task.assignee_kind = KanbanTask.AssigneeKind.CUSTOMER
+            return
+
+        # user:<id>
+        if token.startswith("user:"):
+            user_id = int(token.split(":", 1)[1])
+            if task.project.responsible_id != user_id:
+                raise serializers.ValidationError({"assignee": "Нельзя назначить этого пользователя: он не связан с проектом."})
+            task.assignee_kind = KanbanTask.AssigneeKind.USER
+            task.assignee_user_id = user_id
+            return
+
+        # dev:<id>
+        if token.startswith("dev:"):
+            dev_id = int(token.split(":", 1)[1])
+            if not task.project.developers.filter(id=dev_id).exists():
+                raise serializers.ValidationError({"assignee": "Нельзя назначить этого разработчика: он не связан с проектом."})
+            task.assignee_kind = KanbanTask.AssigneeKind.DEVELOPER
+            task.assignee_developer_id = dev_id
+            return
+
+        raise serializers.ValidationError({"assignee": "Некорректный формат исполнителя."})
+
+    def update(self, instance, validated_data):
+        # вытаскиваем токен исполнителя из initial_data (потому что поле write_only)
+        token = None
+        if "assignee" in self.initial_data:
+            token = self.initial_data.get("assignee")
+
+        instance = super().update(instance, validated_data)
+
+        if token is not None:
+            self._apply_assignee_token(instance, token)
+            instance.save(update_fields=["assignee_kind", "assignee_user", "assignee_developer", "updated_at"])
+
+        return instance
+
+    def validate_deadline(self, value):
+        """
+        Разрешаем пустой дедлайн.
+        """
+        if value in ("", None):
+            return None
+        return value
+
 
 
 class KanbanTaskHistorySerializer(serializers.ModelSerializer):
@@ -206,3 +285,40 @@ class KanbanTaskHistorySerializer(serializers.ModelSerializer):
             return "System"
         # можно улучшить под твою модель User
         return getattr(obj.user, "email", None) or str(obj.user)
+
+class ProjectFileSerializer(serializers.ModelSerializer):
+    filename = serializers.SerializerMethodField()
+    url = serializers.FileField(source="file", read_only=True)
+
+    class Meta:
+        model = ProjectFile
+        fields = (
+            "id",
+            "uuid",
+            "filename",
+            "url",
+            "created_at",
+        )
+
+    def get_filename(self, obj):
+        return obj.file.name.split("/")[-1]
+
+class ProjectFolderTreeSerializer(serializers.ModelSerializer):
+    folders = serializers.SerializerMethodField()
+    files = ProjectFileSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ProjectFolder
+        fields = (
+            "id",
+            "uuid",
+            "name",
+            "folders",
+            "files",
+        )
+
+    def get_folders(self, obj):
+        children = obj.children.all().order_by("name")
+        return ProjectFolderTreeSerializer(children, many=True).data
+
+
