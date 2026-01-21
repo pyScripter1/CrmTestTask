@@ -77,6 +77,13 @@ class Project(models.Model):
     active_stage = models.TextField(blank=True, default='', verbose_name="Текущий этап")
     comments = models.TextField(blank=True, default='', verbose_name="Комментарии")
 
+    attention_note = models.TextField(
+        blank=True,
+        default='',
+        verbose_name="⚠️ Обратите внимание",
+        help_text="Важные заметки и нюансы по проекту. Видно и редактируется всеми участниками."
+    )
+
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
 
