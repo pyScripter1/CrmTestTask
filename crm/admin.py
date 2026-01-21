@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django import forms
 from django.utils.html import format_html
 
 from unfold.admin import ModelAdmin, TabularInline  # база из Unfold
@@ -24,6 +25,44 @@ class ProjectAdmin(ModelAdmin):  # 👈 наследуемся от Unfold Model
     autocomplete_fields = ('developers',)
 
     readonly_fields = ("kanban_link", "files_link")
+
+    change_form_template = "admin/crm/project/change_form.html"
+
+    def get_fieldsets(self, request, obj=None):
+        """
+        Preserve the original field order (from get_fields), but move "attention_note"
+        to a dedicated right sidebar fieldset.
+        """
+        # Базовый порядок полей — как раньше (учитывает роль в get_fields)
+        fields = list(self.get_fields(request, obj))
+
+        # Remove note from the main area; it will render in the sidebar
+        if "attention_note" in fields:
+            fields = [f for f in fields if f != "attention_note"]
+
+        return (
+            ("Project", {"fields": tuple(fields)}),
+            ("⚠️ Обратите внимание", {"fields": ("attention_note",), "classes": ("please-note-fieldset",)}),
+        )
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        if db_field.name == "attention_note":
+            kwargs["label"] = ""  # заголовок уже есть у правого блока
+            kwargs["widget"] = forms.Textarea(attrs={"rows": 18, "style": "width:100%; min-height: 320px;"})
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
+
+    def get_changeform_initial_data(self, request):
+        """
+        PM creating a new project: default 'responsible' to themselves.
+        """
+        initial = super().get_changeform_initial_data(request)
+        user = request.user
+
+        # only on "add" page (no object yet), don't override explicit querystring initial
+        if getattr(user, "is_pm", lambda: False)() and "responsible" not in initial:
+            initial["responsible"] = user.pk
+
+        return initial
 
     list_display_links = list_display
 
@@ -169,7 +208,7 @@ class ProjectAdmin(ModelAdmin):  # 👈 наследуемся от Unfold Model
         Менять проекты могут:
         - Admin (всегда)
         - PM, но только свои (где он responsible)
-        Разработчики — только просмотр.
+        Разработчики — могут менять только поле "⚠️ Обратите внимание" в своих проектах.
         """
         user = request.user
         if not user or not user.is_authenticated:
@@ -181,7 +220,15 @@ class ProjectAdmin(ModelAdmin):  # 👈 наследуемся от Unfold Model
             if obj is None:
                 return True
             return obj.responsible == user
-        # Разработчики не меняют проекты
+        if getattr(user, "is_dev", lambda: False)():
+            # Список/массовые операции не нужны — только change form конкретного проекта
+            if obj is None:
+                return False
+            try:
+                developer = user.developer_profile
+                return obj.developers.filter(id=developer.id).exists()
+            except Exception:
+                return False
         return False
 
     def has_delete_permission(self, request, obj=None):
@@ -213,20 +260,57 @@ class ProjectAdmin(ModelAdmin):  # 👈 наследуемся от Unfold Model
         return qs.none()
 
     def get_fields(self, request, obj=None):
+        """
+        Явно контролируем порядок полей для DEV,
+        чтобы он был таким же, как до правок.
+        """
+        user = request.user
+
+        # --- DEV: фиксированный, правильный порядок ---
+        if user.is_dev():
+            fields = [
+                "name",  # Название проекта
+                "deadline",  # Дедлайн
+                "completion_percent",  # Готовность
+                "responsible",  # Ответственный
+                "developers",  # Разработчики
+                "stages",  # Этапы проекта
+                "active_stage",  # Текущий этап
+                "comments",  # Комментарии
+            ]
+
+            # Канбан показываем только для сохранённого проекта
+            if obj:
+                fields.append("kanban_link")
+
+            return fields
+
+        # --- НЕ DEV: стандартная логика ---
         fields = list(super().get_fields(request, obj))
 
         if obj and "kanban_link" not in fields:
             fields.insert(1, "kanban_link")
 
-        # DEV: убираем кликабельный FK responsible и показываем текст
-        if request.user.is_dev() and obj:
-            fields = ["responsible_plain" if f == "responsible" else f for f in fields]
-
-        if request.user.is_dev():
-            forbidden = ("customer_name", "total_cost", "documents")
-            fields = [f for f in fields if f not in forbidden]
-
         return fields
+
+    def get_readonly_fields(self, request, obj=None):
+        """
+        DEV может редактировать только attention_note; остальные поля read-only.
+        """
+        user = request.user
+        if user and getattr(user, "is_dev", lambda: False)():
+            # все реальные поля модели + объявленные readonly,
+            # кроме attention_note (её оставляем редактируемой)
+            model_fields = [f.name for f in self.model._meta.fields]
+            m2m_fields = [m.name for m in self.model._meta.many_to_many]
+            base = set(model_fields + m2m_fields)
+            base.update(self.readonly_fields or ())
+            if "attention_note" in base:
+                base.remove("attention_note")
+            return tuple(sorted(base))
+        return super().get_readonly_fields(request, obj)
+
+
 
     def get_inline_instances(self, request, obj=None):
         """
